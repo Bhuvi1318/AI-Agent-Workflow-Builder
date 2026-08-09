@@ -1,14 +1,29 @@
 import { NextResponse } from "next/server";
 import { GraphQLClient, gql } from "graphql-request";
 
+/* =====================================================
+   WORKFLOW CONFIGURATION
+===================================================== */
+
 const WORKFLOW_ID =
   "23121b2e-5975-416c-854a-4c53bf596124";
+
+/* =====================================================
+   LOCAL OLLAMA CONFIGURATION
+===================================================== */
 
 const OLLAMA_URL =
   "http://127.0.0.1:11434/api/generate";
 
 const OLLAMA_MODEL =
   "qwen2.5:3b";
+
+/* =====================================================
+   GEMINI CONFIGURATION
+===================================================== */
+
+const GEMINI_MODEL =
+  "gemini-2.5-flash-lite";
 
 /* =====================================================
    GET WORKFLOW
@@ -119,7 +134,6 @@ const UPDATE_STEP_RUNNING = gql`
 
 /* =====================================================
    UPDATE STEP COMPLETED
-
    output is JSONB
 ===================================================== */
 
@@ -219,16 +233,171 @@ const UPDATE_WORKFLOW_FAILED = gql`
 `;
 
 /* =====================================================
+   GEMINI AI CALL
+===================================================== */
+
+async function callGemini(
+  prompt: string
+): Promise<string> {
+
+  const apiKey =
+    process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    throw new Error(
+      "GEMINI_API_KEY is missing"
+    );
+  }
+
+  console.log(
+    "Calling Gemini..."
+  );
+
+  const url =
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+
+  const response =
+    await fetch(url, {
+      method: "POST",
+
+      headers: {
+        "Content-Type":
+          "application/json",
+      },
+
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: prompt,
+              },
+            ],
+          },
+        ],
+
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 2048,
+        },
+      }),
+    });
+
+  if (!response.ok) {
+
+    const errorText =
+      await response.text();
+
+    throw new Error(
+      `Gemini error ${response.status}: ${errorText}`
+    );
+  }
+
+  const data =
+    await response.json();
+
+  const output =
+    data?.candidates?.[0]?.content?.parts
+      ?.map(
+        (part: any) =>
+          part?.text || ""
+      )
+      .join("")
+      .trim();
+
+  if (!output) {
+    throw new Error(
+      "Gemini returned an empty response"
+    );
+  }
+
+  console.log(
+    "Gemini response received"
+  );
+
+  return output;
+}
+
+/* =====================================================
+   LOCAL OLLAMA AI CALL
+===================================================== */
+
+async function callOllama(
+  prompt: string
+): Promise<string> {
+
+  console.log(
+    "Calling Ollama..."
+  );
+
+  const response =
+    await fetch(
+      OLLAMA_URL,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+
+        body: JSON.stringify({
+          model:
+            OLLAMA_MODEL,
+
+          prompt,
+
+          stream:
+            false,
+        }),
+      }
+    );
+
+  if (!response.ok) {
+
+    const errorText =
+      await response.text();
+
+    throw new Error(
+      `Ollama error ${response.status}: ${errorText}`
+    );
+  }
+
+  const data =
+    await response.json();
+
+  const output =
+    typeof data.response ===
+    "string"
+      ? data.response.trim()
+      : "";
+
+  if (!output) {
+    throw new Error(
+      "Ollama returned an empty response"
+    );
+  }
+
+  console.log(
+    "Ollama response received"
+  );
+
+  return output;
+}
+
+/* =====================================================
    POST
 ===================================================== */
 
 export async function POST(
   request: Request
 ) {
+
   let workflowRunId = "";
   let stepRunId = "";
 
   try {
+
     /* =================================================
        1. GET USER INPUT
     ================================================= */
@@ -242,9 +411,11 @@ export async function POST(
         : "";
 
     if (!userInput) {
+
       return NextResponse.json(
         {
           success: false,
+
           error:
             "User input is required.",
         },
@@ -270,12 +441,14 @@ export async function POST(
       process.env.NHOST_ADMIN_SECRET;
 
     if (!graphqlUrl) {
+
       throw new Error(
         "NHOST_GRAPHQL_URL is missing"
       );
     }
 
     if (!adminSecret) {
+
       throw new Error(
         "NHOST_ADMIN_SECRET is missing"
       );
@@ -287,6 +460,11 @@ export async function POST(
 
     console.log(
       "Nhost admin secret loaded: true"
+    );
+
+    console.log(
+      "Gemini API key loaded:",
+      !!process.env.GEMINI_API_KEY
     );
 
     /* =================================================
@@ -319,7 +497,8 @@ export async function POST(
       await client.request(
         GET_WORKFLOW,
         {
-          id: WORKFLOW_ID,
+          id:
+            WORKFLOW_ID,
         }
       );
 
@@ -327,6 +506,7 @@ export async function POST(
       workflowData.workflows_by_pk;
 
     if (!workflow) {
+
       throw new Error(
         "Workflow not found"
       );
@@ -345,6 +525,7 @@ export async function POST(
       !workflow.workflow_steps ||
       workflow.workflow_steps.length === 0
     ) {
+
       throw new Error(
         "Workflow has no steps"
       );
@@ -390,10 +571,8 @@ export async function POST(
           completed_at:
             startTime,
 
-          /*
-           * error column is NOT NULL
-           */
-          error: "",
+          error:
+            "",
         }
       );
 
@@ -401,6 +580,7 @@ export async function POST(
       runData.insert_workflow_runs_one;
 
     if (!workflowRun) {
+
       throw new Error(
         "Workflow run was not created"
       );
@@ -444,6 +624,7 @@ export async function POST(
       stepData.insert_step_runs_one;
 
     if (!stepRun) {
+
       throw new Error(
         "Step run was not created"
       );
@@ -464,7 +645,8 @@ export async function POST(
     await client.request(
       UPDATE_STEP_RUNNING,
       {
-        id: stepRunId,
+        id:
+          stepRunId,
       }
     );
 
@@ -473,12 +655,8 @@ export async function POST(
     );
 
     /* =================================================
-       9. CALL OLLAMA
+       9. PREPARE AI PROMPT
     ================================================= */
-
-    console.log(
-      "Calling Ollama..."
-    );
 
     const prompt = `
 You are an AI assistant executing a workflow step.
@@ -491,56 +669,56 @@ ${userInput}
 Give only the useful answer to the user's request.
 `;
 
-    const ollamaResponse =
-      await fetch(
-        OLLAMA_URL,
-        {
-          method: "POST",
+    /* =================================================
+       10. CALL AI
+       
+       Production/Vercel:
+       Gemini
 
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
+       Local development without Gemini key:
+       Ollama
+    ================================================= */
 
-          body: JSON.stringify({
-            model:
-              OLLAMA_MODEL,
+    let output = "";
+    let provider = "";
+    let model = "";
 
-            prompt,
+    if (
+      process.env.GEMINI_API_KEY
+    ) {
 
-            stream:
-              false,
-          }),
-        }
+      console.log(
+        "AI provider: Gemini"
       );
 
-    if (!ollamaResponse.ok) {
-      const errorText =
-        await ollamaResponse.text();
+      output =
+        await callGemini(
+          prompt
+        );
 
-      throw new Error(
-        `Ollama error ${ollamaResponse.status}: ${errorText}`
+      provider =
+        "gemini";
+
+      model =
+        GEMINI_MODEL;
+
+    } else {
+
+      console.log(
+        "AI provider: Ollama"
       );
+
+      output =
+        await callOllama(
+          prompt
+        );
+
+      provider =
+        "ollama";
+
+      model =
+        OLLAMA_MODEL;
     }
-
-    const ollamaData =
-      await ollamaResponse.json();
-
-    const output =
-      typeof ollamaData.response ===
-      "string"
-        ? ollamaData.response.trim()
-        : "";
-
-    if (!output) {
-      throw new Error(
-        "Ollama returned an empty response"
-      );
-    }
-
-    console.log(
-      "Ollama response received"
-    );
 
     console.log(
       "AI output length:",
@@ -548,18 +726,19 @@ Give only the useful answer to the user's request.
     );
 
     /* =================================================
-       10. SAVE OUTPUT AS JSONB
+       11. SAVE OUTPUT AS JSONB
     ================================================= */
 
     const outputJson = {
+
       response:
         output,
 
       model:
-        OLLAMA_MODEL,
+        model,
 
       provider:
-        "ollama",
+        provider,
 
       user_input:
         userInput,
@@ -589,7 +768,7 @@ Give only the useful answer to the user's request.
     );
 
     /* =================================================
-       11. MARK WORKFLOW COMPLETED
+       12. MARK WORKFLOW COMPLETED
     ================================================= */
 
     const completedWorkflow =
@@ -606,10 +785,11 @@ Give only the useful answer to the user's request.
     );
 
     /* =================================================
-       12. RETURN SUCCESS
+       13. RETURN SUCCESS
     ================================================= */
 
     return NextResponse.json({
+
       success:
         true,
 
@@ -617,6 +797,7 @@ Give only the useful answer to the user's request.
         "Workflow completed successfully",
 
       workflow: {
+
         id:
           workflow.id,
 
@@ -675,6 +856,7 @@ Give only the useful answer to the user's request.
     ================================================= */
 
     try {
+
       const graphqlUrl =
         process.env.NHOST_GRAPHQL_URL;
 
@@ -685,6 +867,7 @@ Give only the useful answer to the user's request.
         graphqlUrl &&
         adminSecret
       ) {
+
         const errorClient =
           new GraphQLClient(
             graphqlUrl,
@@ -704,6 +887,7 @@ Give only the useful answer to the user's request.
         --------------------------------------------- */
 
         if (stepRunId) {
+
           await errorClient.request(
             UPDATE_STEP_FAILED,
             {
@@ -725,6 +909,7 @@ Give only the useful answer to the user's request.
         --------------------------------------------- */
 
         if (workflowRunId) {
+
           await errorClient.request(
             UPDATE_WORKFLOW_FAILED,
             {
