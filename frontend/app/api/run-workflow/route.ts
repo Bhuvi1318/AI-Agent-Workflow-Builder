@@ -253,51 +253,99 @@ async function callGemini(
     "Calling Gemini..."
   );
 
+  /*
+   * Google Gemini generateContent API
+   *
+   * API key is sent through x-goog-api-key.
+   */
   const url =
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
-  const response =
-    await fetch(url, {
-      method: "POST",
+  let response: Response;
 
-      headers: {
-        "Content-Type":
-          "application/json",
-      },
+  try {
 
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: prompt,
-              },
-            ],
+    response =
+      await fetch(
+        url,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+
+            "x-goog-api-key":
+              apiKey,
           },
-        ],
 
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 2048,
-        },
-      }),
-    });
+          body:
+            JSON.stringify({
+              contents: [
+                {
+                  role: "user",
 
-  if (!response.ok) {
+                  parts: [
+                    {
+                      text: prompt,
+                    },
+                  ],
+                },
+              ],
+            }),
+        }
+      );
 
-    const errorText =
-      await response.text();
+  } catch (networkError: any) {
+
+    console.error(
+      "Gemini network error:",
+      networkError
+    );
 
     throw new Error(
-      `Gemini error ${response.status}: ${errorText}`
+      `Gemini connection failed: ${
+        networkError?.message ||
+        "Unable to connect to Gemini API"
+      }`
     );
   }
 
-  const data =
-    await response.json();
+  const responseText =
+    await response.text();
+
+  if (!response.ok) {
+
+    console.error(
+      "Gemini HTTP error:",
+      response.status,
+      responseText
+    );
+
+    throw new Error(
+      `Gemini error ${response.status}: ${responseText}`
+    );
+  }
+
+  let data: any;
+
+  try {
+
+    data =
+      JSON.parse(
+        responseText
+      );
+
+  } catch {
+
+    throw new Error(
+      "Gemini returned an invalid JSON response"
+    );
+  }
 
   const output =
-    data?.candidates?.[0]?.content?.parts
+    data?.candidates?.[0]
+      ?.content?.parts
       ?.map(
         (part: any) =>
           part?.text || ""
@@ -306,6 +354,12 @@ async function callGemini(
       .trim();
 
   if (!output) {
+
+    console.error(
+      "Unexpected Gemini response:",
+      JSON.stringify(data)
+    );
+
     throw new Error(
       "Gemini returned an empty response"
     );
@@ -341,15 +395,16 @@ async function callOllama(
             "application/json",
         },
 
-        body: JSON.stringify({
-          model:
-            OLLAMA_MODEL,
+        body:
+          JSON.stringify({
+            model:
+              OLLAMA_MODEL,
 
-          prompt,
+            prompt,
 
-          stream:
-            false,
-        }),
+            stream:
+              false,
+          }),
       }
     );
 
@@ -373,6 +428,7 @@ async function callOllama(
       : "";
 
   if (!output) {
+
     throw new Error(
       "Ollama returned an empty response"
     );
@@ -440,6 +496,9 @@ export async function POST(
     const adminSecret =
       process.env.NHOST_ADMIN_SECRET;
 
+    const geminiApiKey =
+      process.env.GEMINI_API_KEY;
+
     if (!graphqlUrl) {
 
       throw new Error(
@@ -464,7 +523,7 @@ export async function POST(
 
     console.log(
       "Gemini API key loaded:",
-      !!process.env.GEMINI_API_KEY
+      !!geminiApiKey
     );
 
     /* =================================================
@@ -671,11 +730,11 @@ Give only the useful answer to the user's request.
 
     /* =================================================
        10. CALL AI
-       
-       Production/Vercel:
+
+       VERCEL / PRODUCTION:
        Gemini
 
-       Local development without Gemini key:
+       LOCAL WITHOUT GEMINI KEY:
        Ollama
     ================================================= */
 
@@ -683,9 +742,7 @@ Give only the useful answer to the user's request.
     let provider = "";
     let model = "";
 
-    if (
-      process.env.GEMINI_API_KEY
-    ) {
+    if (geminiApiKey) {
 
       console.log(
         "AI provider: Gemini"
