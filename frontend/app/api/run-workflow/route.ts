@@ -296,20 +296,22 @@ async function callGemini(
         }
       );
 
-  } catch (networkError: any) {
+ } catch (networkError: any) {
+  console.error("GEMINI NETWORK ERROR:", {
+    message: networkError?.message,
+    name: networkError?.name,
+    code: networkError?.code,
+    cause: networkError?.cause,
+  });
 
-    console.error(
-      "Gemini network error:",
-      networkError
-    );
-
-    throw new Error(
-      `Gemini connection failed: ${
-        networkError?.message ||
-        "Unable to connect to Gemini API"
-      }`
-    );
-  }
+  throw new Error(
+    `Gemini connection failed: ${
+      networkError?.cause?.code ||
+      networkError?.message ||
+      "Unknown network error"
+    }`
+  );
+}
 
   const responseText =
     await response.text();
